@@ -74,21 +74,21 @@ func TestPipeCloseError(t *testing.T) {
 	type testError2 struct{ error }
 
 	r, w := Pipe()
-	r.CloseWithError(testError1{})
+	r.(*PipeReader).CloseWithError(testError1{})
 	if _, err := w.Write(nil); err != (testError1{}) {
 		t.Errorf("Write error: got %T, want testError1", err)
 	}
-	r.CloseWithError(testError2{})
+	r.(*PipeReader).CloseWithError(testError2{})
 	if _, err := w.Write(nil); err != (testError1{}) {
 		t.Errorf("Write error: got %T, want testError1", err)
 	}
 
 	r, w = Pipe()
-	w.CloseWithError(testError1{})
+	w.(*PipeWriter).CloseWithError(testError1{})
 	if _, err := r.Read(nil); err != (testError1{}) {
 		t.Errorf("Read error: got %T, want testError1", err)
 	}
-	w.CloseWithError(testError2{})
+	w.(*PipeWriter).CloseWithError(testError2{})
 	if _, err := r.Read(nil); err != (testError1{}) {
 		t.Errorf("Read error: got %T, want testError1", err)
 	}

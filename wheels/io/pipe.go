@@ -92,7 +92,7 @@ func (p *pipe) closeWrite(err error) error {
 	return nil
 }
 
-func Pipe() (*PipeReader, *PipeWriter) {
+func Pipe() (io.ReadCloser, io.WriteCloser) {
 	p := &pipe{
 		wrCh: make(chan []byte),
 		rdCh: make(chan int),
