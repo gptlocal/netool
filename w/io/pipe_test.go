@@ -1,7 +1,7 @@
 package io_test
 
 import (
-	. "github.com/gptlocal/netool/wheels/io"
+	. "github.com/gptlocal/netool/w/io"
 	"io"
 	"testing"
 )

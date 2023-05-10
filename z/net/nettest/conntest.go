@@ -38,6 +38,7 @@ func timeoutWrapper(t *testing.T, mp MakePipe, f connTester) {
 	if err != nil {
 		t.Fatalf("unable to make pipe: %v", err)
 	}
+
 	var once sync.Once
 	defer once.Do(func() { stop() })
 	timer := time.AfterFunc(time.Minute, func() {
@@ -58,9 +59,12 @@ func testBasicIO(t *testing.T, c1, c2 net.Conn) {
 	dataCh := make(chan []byte)
 	go func() {
 		rd := bytes.NewReader(want)
-		if err := chunkedCopy(c1, rd); err != nil {
+		if n, err := chunkedCopy(c1, rd); err != nil {
 			t.Errorf("unexpected c1.Write error: %v", err)
+		} else {
+			t.Logf("chunkedCopy(c1, rd) %d bytes", n)
 		}
+
 		if err := c1.Close(); err != nil {
 			t.Errorf("unexpected c1.Close error: %v", err)
 		}
@@ -68,9 +72,12 @@ func testBasicIO(t *testing.T, c1, c2 net.Conn) {
 
 	go func() {
 		wr := new(bytes.Buffer)
-		if err := chunkedCopy(wr, c2); err != nil {
+		if n, err := chunkedCopy(wr, c2); err != nil {
 			t.Errorf("unexpected c2.Read error: %v", err)
+		} else {
+			t.Logf("chunkedCopy(wr, c2) %d bytes", n)
 		}
+
 		if err := c2.Close(); err != nil {
 			t.Errorf("unexpected c2.Close error: %v", err)
 		}
@@ -185,7 +192,7 @@ func testRacyWrite(t *testing.T, c1, c2 net.Conn) {
 
 // testReadTimeout tests that Read timeouts do not affect Write.
 func testReadTimeout(t *testing.T, c1, c2 net.Conn) {
-	go chunkedCopy(ioutil.Discard, c2)
+	go chunkedCopy(io.Discard, c2)
 
 	c1.SetReadDeadline(aLongTimeAgo)
 	_, err := c1.Read(make([]byte, 1024))
@@ -438,8 +445,7 @@ func checkForTimeoutError(t *testing.T, err error) {
 
 // chunkedCopy copies from r to w in fixed-width chunks to avoid causing a Write that exceeds the maximum packet size
 // for packet-based connections like "unixpacket". We assume that the maximum packet size is at least 1024.
-func chunkedCopy(w io.Writer, r io.Reader) error {
+func chunkedCopy(w io.Writer, r io.Reader) (int64, error) {
 	b := make([]byte, 1024)
-	_, err := io.CopyBuffer(struct{ io.Writer }{w}, struct{ io.Reader }{r}, b)
-	return err
+	return io.CopyBuffer(struct{ io.Writer }{w}, struct{ io.Reader }{r}, b)
 }

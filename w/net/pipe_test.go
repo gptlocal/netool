@@ -1,7 +1,7 @@
 package net_test
 
 import (
-	. "github.com/gptlocal/netool/wheels/net"
+	. "github.com/gptlocal/netool/w/net"
 	"github.com/gptlocal/netool/z/net/nettest"
 	"io"
 	"net"
