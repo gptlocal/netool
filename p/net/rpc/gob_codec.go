@@ -14,22 +14,18 @@ type gobClientCodec struct {
 	encBuf *bufio.Writer
 }
 
-func (c *gobClientCodec) WriteRequest(r *Request, body any) (err error) {
+func (c *gobClientCodec) WriteRequest(r *Request, payload any) (err error) {
 	if err = c.enc.Encode(r); err != nil {
 		return
 	}
-	if err = c.enc.Encode(body); err != nil {
+	if err = c.enc.Encode(payload); err != nil {
 		return
 	}
 	return c.encBuf.Flush()
 }
 
-func (c *gobClientCodec) ReadResponseHeader(r *Response) error {
+func (c *gobClientCodec) ReadResponse(r *Response) error {
 	return c.dec.Decode(r)
-}
-
-func (c *gobClientCodec) ReadResponseBody(body any) error {
-	return c.dec.Decode(body)
 }
 
 func (c *gobClientCodec) Close() error {
@@ -44,15 +40,11 @@ type gobServerCodec struct {
 	closed bool
 }
 
-func (c *gobServerCodec) ReadRequestHeader(r *Request) error {
+func (c *gobServerCodec) ReadRequest(r *Request, payload any) error {
 	return c.dec.Decode(r)
 }
 
-func (c *gobServerCodec) ReadRequestBody(body any) error {
-	return c.dec.Decode(body)
-}
-
-func (c *gobServerCodec) WriteResponse(r *Response, body any) (err error) {
+func (c *gobServerCodec) WriteResponse(r *Response, payload any) (err error) {
 	if err = c.enc.Encode(r); err != nil {
 		if c.encBuf.Flush() == nil {
 			log.Println("rpc: gob error encoding response:", err)
@@ -60,15 +52,6 @@ func (c *gobServerCodec) WriteResponse(r *Response, body any) (err error) {
 		}
 		return
 	}
-
-	if err = c.enc.Encode(body); err != nil {
-		if c.encBuf.Flush() == nil {
-			log.Println("rpc: gob error encoding body:", err)
-			c.Close()
-		}
-		return
-	}
-
 	return c.encBuf.Flush()
 }
 

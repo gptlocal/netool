@@ -23,88 +23,73 @@ func (server *Server) ServeConn(codec ServerCodec) {
 	sending := new(sync.Mutex)
 	wg := new(sync.WaitGroup)
 	for {
-		service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
+		req, err := server.readRequest(codec)
 		if err != nil {
-			if err != io.EOF {
-				log.Println("rpc:", err)
-			}
-			if !keepReading {
-				break
-			}
-			// send a response if we actually managed to read a header.
-			if req != nil {
-				server.sendResponse(sending, req, invalidRequest, codec, err.Error())
-				// todo: use sync.Pool for req
-			}
+			log.Printf("rpc: server cannot decode request: %v", err)
+			server.sendResponse(sending, req, nil, codec, err.Error())
+			// todo: use sync.Pool for req
 			continue
 		}
+
+		svc, mtype, err := server.findService(req)
+		if err != nil {
+			log.Printf("rpc: can't find service %s", req.ServiceMethod)
+			server.sendResponse(sending, req, nil, codec, err.Error())
+			// todo: use sync.Pool for req
+			continue
+		}
+
 		wg.Add(1)
-		go service.call(server, sending, wg, mtype, req, argv, replyv, codec)
+
+		// Decode the argument value.
+		var argv reflect.Value
+		argIsValue := false // if true, need to indirect before calling.
+		if mtype.ArgType.Kind() == reflect.Pointer {
+			argv = reflect.New(mtype.ArgType.Elem())
+		} else {
+			argv = reflect.New(mtype.ArgType)
+			argIsValue = true
+		}
+
+		// argv guaranteed to be a pointer now.
+		argv.Elem().Set(reflect.ValueOf(req.Payload))
+		if argIsValue {
+			argv = argv.Elem()
+		}
+
+		replyv := reflect.New(mtype.ReplyType.Elem())
+		switch mtype.ReplyType.Elem().Kind() {
+		case reflect.Map:
+			replyv.Elem().Set(reflect.MakeMap(mtype.ReplyType.Elem()))
+		case reflect.Slice:
+			replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
+		}
+
+		go svc.call(server, sending, wg, mtype, req, argv, replyv, codec)
 	}
 	// We've seen that there are no more requests. Wait for responses to be sent before closing codec.
 	wg.Wait()
 	codec.Close()
 }
 
-func (server *Server) readRequest(codec ServerCodec) (service *service, mtype *methodType, req *Request, argv, replyv reflect.Value, keepReading bool, err error) {
-	service, mtype, req, keepReading, err = server.readRequestHeader(codec)
+func (server *Server) readRequest(codec ServerCodec) (*Request, error) {
+	//todo: use sync.Pool
+	req := &Request{}
+	err := codec.ReadRequest(req)
 	if err != nil {
-		if !keepReading {
-			return
+		if err != io.EOF {
+			log.Println("rpc:", err)
+			return req, nil
 		}
-		// discard body
-		codec.ReadRequestBody(nil)
-		return
+		return nil, err
 	}
-
-	// Decode the argument value.
-	argIsValue := false // if true, need to indirect before calling.
-	if mtype.ArgType.Kind() == reflect.Pointer {
-		argv = reflect.New(mtype.ArgType.Elem())
-	} else {
-		argv = reflect.New(mtype.ArgType)
-		argIsValue = true
-	}
-	// argv guaranteed to be a pointer now.
-	if err = codec.ReadRequestBody(argv.Interface()); err != nil {
-		return
-	}
-	if argIsValue {
-		argv = argv.Elem()
-	}
-
-	replyv = reflect.New(mtype.ReplyType.Elem())
-
-	switch mtype.ReplyType.Elem().Kind() {
-	case reflect.Map:
-		replyv.Elem().Set(reflect.MakeMap(mtype.ReplyType.Elem()))
-	case reflect.Slice:
-		replyv.Elem().Set(reflect.MakeSlice(mtype.ReplyType.Elem(), 0, 0))
-	}
-	return
+	return req, nil
 }
 
-func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype *methodType, req *Request, keepReading bool, err error) {
-	// Grab the request header.
-	// todo: use sync.Pool
-	req = &Request{}
-	err = codec.ReadRequestHeader(req)
-	if err != nil {
-		req = nil
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return
-		}
-		err = errors.New("rpc: server cannot decode request: " + err.Error())
-		return
-	}
-
-	// We read the header successfully. If we see an error now, we can still recover and move on to the next request.
-	keepReading = true
-
+func (server *Server) findService(req *Request) (svc *service, mtype *methodType, err error) {
 	dot := strings.LastIndex(req.ServiceMethod, ".")
 	if dot < 0 {
 		err = errors.New("rpc: service/method request ill-formed: " + req.ServiceMethod)
-		return
 	}
 	serviceName := req.ServiceMethod[:dot]
 	methodName := req.ServiceMethod[dot+1:]
@@ -113,14 +98,15 @@ func (server *Server) readRequestHeader(codec ServerCodec) (svc *service, mtype 
 	svci, ok := server.serviceMap.Load(serviceName)
 	if !ok {
 		err = errors.New("rpc: can't find service " + req.ServiceMethod)
-		return
 	}
+
 	svc = svci.(*service)
 	mtype = svc.method[methodName]
 	if mtype == nil {
 		err = errors.New("rpc: can't find method " + req.ServiceMethod)
 	}
-	return
+
+	return svc, mtype, err
 }
 
 func (server *Server) sendResponse(sending *sync.Mutex, req *Request, reply any, codec ServerCodec, errmsg string) {
@@ -130,11 +116,12 @@ func (server *Server) sendResponse(sending *sync.Mutex, req *Request, reply any,
 	resp.ServiceMethod = req.ServiceMethod
 	if errmsg != "" {
 		resp.Error = errmsg
-		reply = invalidRequest
+		reply = nil
 	}
 	resp.Seq = req.Seq
+	resp.Payload = reply
 	sending.Lock()
-	err := codec.WriteResponse(resp, reply)
+	err := codec.WriteResponse(resp)
 	if err != nil {
 		log.Println("rpc: writing response:", err)
 	}

@@ -76,6 +76,4 @@ var (
 	typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 
 	errMissingParams = errors.New("jsonrpc: request body missing params")
-
-	invalidRequest = struct{}{}
 )

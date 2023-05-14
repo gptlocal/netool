@@ -3,14 +3,16 @@ package rpc_test
 import (
 	"bytes"
 	"encoding/gob"
+	. "github.com/gptlocal/netool/p/net/rpc"
 	"io"
 	"net"
 	"testing"
-
-	. "github.com/gptlocal/netool/p/net/rpc"
 )
 
 func Test_GobCodec(t *testing.T) {
+	gob.Register(Args{})
+	gob.Register(Reply{})
+
 	cli, srv := net.Pipe()
 	defer cli.Close()
 	defer srv.Close()
@@ -18,54 +20,55 @@ func Test_GobCodec(t *testing.T) {
 	go func() {
 		srvCodec := NewGobServerCodec(srv)
 		req := &Request{}
-		err := srvCodec.ReadRequestHeader(req)
+		err := srvCodec.ReadRequest(req)
 		if err != nil {
 			return
 		}
-		t.Logf("ReadRequestHeader: %v", req)
+		t.Logf("ReadRequest: %v", req)
 
-		args := &Args{}
-		srvCodec.ReadRequestBody(args)
-		t.Logf("ReadRequestBody: %v", args)
+		args := req.Payload.(Args)
 
-		reply := &Reply{
+		reply := Reply{
 			C: args.A + args.B,
 		}
 		srvCodec.WriteResponse(&Response{
 			ServiceMethod: req.ServiceMethod,
 			Seq:           req.Seq,
-		}, reply)
+			Payload:       reply,
+		})
 	}()
 
 	cliCodec := NewGobClientCodec(cli)
 	err := cliCodec.WriteRequest(&Request{
 		ServiceMethod: "Arith.Add",
 		Seq:           123,
-	}, &Args{7, 8})
+		Payload:       Args{7, 8},
+	})
 
 	if err != nil {
 		t.Fatalf("WriteRequest: %s", err)
 	}
 
 	resp := &Response{}
-	err = cliCodec.ReadResponseHeader(resp)
+	err = cliCodec.ReadResponse(resp)
 	if err != nil {
-		t.Fatalf("ReadResponseHeader: %s", err)
+		t.Fatalf("ReadResponse: %s", err)
 	}
 
-	reply := &Reply{}
-	err = cliCodec.ReadResponseBody(reply)
-	if err != nil {
-		t.Fatalf("ReadResponseBody: %s", err)
-	}
+	reply := resp.Payload.(Reply)
 
 	if reply.C != 15 {
 		t.Fatalf("expected 15, got %d", reply.C)
 	}
+	t.Logf("ReadResponse: %v", reply.C)
 }
 
 func TestGobDecodeEncode(t *testing.T) {
+	gob.Register(Args{})
+	gob.Register(Reply{})
+
 	r1, w1 := io.Pipe()
+	defer r1.Close()
 
 	var out bytes.Buffer
 	sc := NewGobServerCodec(struct {
@@ -80,21 +83,23 @@ func TestGobDecodeEncode(t *testing.T) {
 
 	go func() {
 		enc := gob.NewEncoder(w1)
-		enc.Encode(&Request{ServiceMethod: "Arith.Add", Seq: 123})
-		enc.Encode(&Args{A: 7, B: 8})
+		err := enc.Encode(&Request{ServiceMethod: "Arith.Add", Seq: 123, Payload: Args{A: 7, B: 8}})
+		if err != nil {
+			t.Logf("encode err: %v", err)
+		}
 	}()
 
 	r := new(Request)
-	if err := sc.ReadRequestHeader(r); err != nil {
+	if err := sc.ReadRequest(r); err != nil {
 		t.Fatal(err)
 	}
 
-	args := new(Args)
-	if err := sc.ReadRequestBody(args); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := sc.WriteResponse(&Response{ServiceMethod: "Arith.Add", Seq: 123}, &Reply{C: args.A + args.B}); err != nil {
+	args := r.Payload.(Args)
+	if err := sc.WriteResponse(&Response{
+		ServiceMethod: "Arith.Add",
+		Seq:           123,
+		Payload:       Reply{C: args.A + args.B},
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -105,10 +110,7 @@ func TestGobDecodeEncode(t *testing.T) {
 	}
 	t.Logf("res: %#v", res)
 
-	reply := new(Reply)
-	if err := dec.Decode(reply); err != nil {
-		t.Fatal(err)
-	}
+	reply := res.Payload.(Reply)
 	t.Logf("reply: %#v", reply)
 }
 

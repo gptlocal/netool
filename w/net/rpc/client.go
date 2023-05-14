@@ -36,8 +36,7 @@ func DialHTTPPath(network, address, path string) (*Client, error) {
 	}
 	io.WriteString(conn, "CONNECT "+path+" HTTP/1.0\n\n")
 
-	// Require successful HTTP response
-	// before switching to RPC protocol.
+	// Require successful HTTP response before switching to RPC protocol.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
 	if err == nil && resp.Status == connected {
 		return NewClient(conn), nil

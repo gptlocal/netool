@@ -1,28 +1,43 @@
 package rpc
 
+import (
+	"encoding/json"
+	"sync"
+)
+
 type Request struct {
-	ServiceMethod string
-	Seq           uint64
+	ServiceMethod string `json:"service_method"`
+	Seq           uint64 `json:"seq"`
 }
 
 type Response struct {
-	ServiceMethod string
-	Seq           uint64
-	Error         string
+	ServiceMethod string `json:"service_method"`
+	Seq           uint64 `json:"seq"`
+	Error         string `json:"error"`
+}
+
+var (
+	reqPool sync.Pool
+	resPool sync.Pool
+
+	null = json.RawMessage("null")
+)
+
+func init() {
+	reqPool.New = func() any { return new(Request) }
+	resPool.New = func() any { return new(Response) }
 }
 
 type ClientCodec interface {
-	WriteRequest(*Request, any) error
-	ReadResponseHeader(*Response) error
-	ReadResponseBody(any) error
+	WriteRequest(req *Request, payload any) error
+	ReadResponse(res *Response, payload any) error
 
 	Close() error
 }
 
 type ServerCodec interface {
-	ReadRequestHeader(*Request) error
-	ReadRequestBody(any) error
-	WriteResponse(*Response, any) error
+	ReadRequest(req *Request, payload any) error
+	WriteResponse(res *Response, payload any) error
 
 	Close() error
 }
