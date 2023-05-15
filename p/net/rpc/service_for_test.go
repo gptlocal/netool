@@ -1,7 +1,6 @@
 package rpc_test
 
 import (
-	"encoding/gob"
 	"errors"
 	"io"
 
@@ -19,10 +18,11 @@ type Reply struct {
 
 type Arith int
 
-type ArithAddResp struct {
-	Id     any   `json:"id"`
-	Result Reply `json:"result"`
-	Error  any   `json:"error"`
+type ArithResp struct {
+	Id     int    `json:"seq"`
+	Method string `json:"method"`
+	Result Reply  `json:"payload"`
+	Error  string `json:"error"`
 }
 
 func (t *Arith) Add(args *Args, reply *Reply) error {
@@ -48,8 +48,6 @@ func (t *Arith) Error(args *Args, reply *Reply) error {
 }
 
 func RunGobService(conn io.ReadWriteCloser) {
-	gob.Register(Args{})
-	gob.Register(Reply{})
 	server := NewServer()
 	server.Register(new(Arith))
 	server.ServeConn(NewGobServerCodec(conn))

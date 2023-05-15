@@ -44,7 +44,7 @@ type service struct {
 	method map[string]*methodType
 }
 
-func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, mtype *methodType, req *Request, argv, replyv reflect.Value, codec ServerCodec) {
+func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, mtype *methodType, resp *AResponse, argv, replyv reflect.Value, codec ServerCodec) {
 	if wg != nil {
 		defer wg.Done()
 	}
@@ -56,12 +56,10 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 	returnValues := function.Call([]reflect.Value{s.rcvr, argv, replyv})
 	// The return value for the method is an error.
 	errInter := returnValues[0].Interface()
-	errmsg := ""
 	if errInter != nil {
-		errmsg = errInter.(error).Error()
+		resp.Error = errInter.(error).Error()
 	}
-	server.sendResponse(sending, req, replyv.Interface(), codec, errmsg)
-	// todo: use sync.Pool for req
+	server.sendResponse(sending, codec, resp, replyv.Interface())
 }
 
 type ServerError string

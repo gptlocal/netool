@@ -3,59 +3,57 @@ package rpc_test
 import (
 	"bytes"
 	"encoding/gob"
-	. "github.com/gptlocal/netool/p/net/rpc"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"testing"
+
+	. "github.com/gptlocal/netool/p/net/rpc"
 )
 
 func Test_GobCodec(t *testing.T) {
-	gob.Register(Args{})
-	gob.Register(Reply{})
-
 	cli, srv := net.Pipe()
 	defer cli.Close()
 	defer srv.Close()
 
 	go func() {
 		srvCodec := NewGobServerCodec(srv)
-		req := &Request{}
-		err := srvCodec.ReadRequest(req)
+		req, err := srvCodec.ReadRequest()
 		if err != nil {
 			return
 		}
 		t.Logf("ReadRequest: %v", req)
 
-		args := req.Payload.(Args)
+		var args Args
+		srvCodec.ReadPayload(req, &args)
 
 		reply := Reply{
 			C: args.A + args.B,
 		}
-		srvCodec.WriteResponse(&Response{
-			ServiceMethod: req.ServiceMethod,
-			Seq:           req.Seq,
-			Payload:       reply,
-		})
+		srvCodec.WriteResponse(&AResponse{
+			ServiceMethod: req.Method(),
+			Seq:           req.SeqId(),
+		}, reply)
 	}()
 
 	cliCodec := NewGobClientCodec(cli)
-	err := cliCodec.WriteRequest(&Request{
+	err := cliCodec.WriteRequest(&ARequest{
 		ServiceMethod: "Arith.Add",
 		Seq:           123,
-		Payload:       Args{7, 8},
-	})
+	}, &Args{7, 8})
 
 	if err != nil {
 		t.Fatalf("WriteRequest: %s", err)
 	}
 
-	resp := &Response{}
-	err = cliCodec.ReadResponse(resp)
+	resp, err := cliCodec.ReadResponse()
 	if err != nil {
 		t.Fatalf("ReadResponse: %s", err)
 	}
 
-	reply := resp.Payload.(Reply)
+	var reply Reply
+	cliCodec.ReadPayload(resp, &reply)
 
 	if reply.C != 15 {
 		t.Fatalf("expected 15, got %d", reply.C)
@@ -83,34 +81,36 @@ func TestGobDecodeEncode(t *testing.T) {
 
 	go func() {
 		enc := gob.NewEncoder(w1)
-		err := enc.Encode(&Request{ServiceMethod: "Arith.Add", Seq: 123, Payload: Args{A: 7, B: 8}})
-		if err != nil {
+		if err := enc.Encode(&ARequest{ServiceMethod: "Arith.Add", Seq: 123}); err != nil {
+			t.Logf("encode err: %v", err)
+		}
+		if err := enc.Encode(&Args{7, 9}); err != nil {
 			t.Logf("encode err: %v", err)
 		}
 	}()
 
-	r := new(Request)
-	if err := sc.ReadRequest(r); err != nil {
+	req, err := sc.ReadRequest()
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	args := r.Payload.(Args)
-	if err := sc.WriteResponse(&Response{
-		ServiceMethod: "Arith.Add",
-		Seq:           123,
-		Payload:       Reply{C: args.A + args.B},
-	}); err != nil {
+	var args Args
+	sc.ReadPayload(req, &args)
+	if err := sc.WriteResponse(&AResponse{req.Method(), req.SeqId(), ""}, &Reply{args.A + args.B}); err != nil {
 		t.Fatal(err)
 	}
 
 	dec := gob.NewDecoder(&out)
-	res := new(Response)
+	res := new(AResponse)
 	if err := dec.Decode(res); err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("res: %#v", res)
 
-	reply := res.Payload.(Reply)
+	reply := new(Reply)
+	if err := dec.Decode(reply); err != nil {
+		t.Fatal(err)
+	}
 	t.Logf("reply: %#v", reply)
 }
 
@@ -179,14 +179,81 @@ func Test_GobClientCall(t *testing.T) {
 	}
 }
 
-func Test_JSONClientCall(t *testing.T) {
+func TestServerNoParams(t *testing.T) {
 	cli, srv := net.Pipe()
 	defer cli.Close()
-	defer srv.Close()
+	go RunJSONService(srv)
+	dec := json.NewDecoder(cli)
 
+	fmt.Fprintf(cli, `{"method": "Arith.Add", "seq": 987}`)
+	var resp ArithResp
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("Decode after no params: %s", err)
+	}
+	t.Logf("resp after no params: %#v", resp)
+
+	if resp.Error == "" {
+		t.Fatalf("Expected error, got nil")
+	}
+}
+
+func TestServerEmptyMessage(t *testing.T) {
+	cli, srv := net.Pipe()
+	defer cli.Close()
+	go RunJSONService(srv)
+	dec := json.NewDecoder(cli)
+
+	fmt.Fprintf(cli, "{}")
+	var resp ArithResp
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("Decode after empty: %s", err)
+	}
+	t.Logf("resp after no params: %#v", resp)
+
+	if resp.Error == "" {
+		t.Fatalf("Expected error, got nil")
+	}
+}
+
+func TestJSONServer(t *testing.T) {
+	cli, srv := net.Pipe()
+	defer cli.Close()
+	go RunJSONService(srv)
+	dec := json.NewDecoder(cli)
+
+	// Send hand-coded requests to server, parse responses.
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(cli, `{"method": "Arith.Add", "seq": %d, "payload": {"A": %d, "B": %d}}`, i, i, i+1)
+		var resp ArithResp
+		err := dec.Decode(&resp)
+		if err != nil {
+			t.Fatalf("Decode: %s", err)
+		}
+
+		t.Logf("resp: %#v", resp)
+
+		if resp.Error != "" {
+			t.Fatalf("resp.Error: %s", resp.Error)
+		}
+
+		if resp.Id != i {
+			t.Fatalf("resp: bad id %d want %d", resp.Result.C, i)
+		}
+
+		if resp.Result.C != 2*i+1 {
+			t.Fatalf("resp: bad result: %d+%d=%d", i, i+1, resp.Result.C)
+		}
+	}
+}
+
+func TestJSONClient(t *testing.T) {
+	// Assume server is okay (TestServer is above).
+	// Test client against server.
+	cli, srv := net.Pipe()
 	go RunJSONService(srv)
 
 	client := NewClient(NewJSONClientCodec(cli))
+	defer cli.Close()
 
 	// Synchronous calls
 	args := &Args{7, 8}
@@ -242,4 +309,27 @@ func Test_JSONClientCall(t *testing.T) {
 	} else if err.Error() != "divide by zero" {
 		t.Error("Div: expected divide by zero error; got", err)
 	}
+}
+
+func TestJSONMalformedInput(t *testing.T) {
+	cli, srv := net.Pipe()
+	go cli.Write([]byte(`{id:1}`)) // invalid json
+	RunJSONService(srv)            // must return, not loop
+}
+
+func TestMalformedOutput(t *testing.T) {
+	cli, srv := net.Pipe()
+	go srv.Write([]byte(`{"seq":0,"payload":null,"error":""}`))
+	go io.ReadAll(srv)
+
+	client := NewClient(NewJSONClientCodec(cli))
+	defer cli.Close()
+
+	args := &Args{7, 8}
+	reply := new(Reply)
+	err := client.Call("Arith.Add", args, reply)
+	if err == nil {
+		t.Error("expected error")
+	}
+	t.Logf("expected error: %s, reply: %v", err, reply)
 }

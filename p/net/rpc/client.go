@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io"
 	"log"
-	"reflect"
 	"sync"
 )
 
@@ -53,12 +52,12 @@ func (client *Client) input() {
 	var err error
 	var response Response
 	for err == nil {
-		response = Response{}
-		err = client.codec.ReadResponse(&response)
+		response, err = client.codec.ReadResponse()
 		if err != nil {
 			break
 		}
-		seq := response.Seq
+
+		seq := response.SeqId()
 
 		client.mutex.Lock()
 		call := client.pending[seq]
@@ -67,12 +66,22 @@ func (client *Client) input() {
 
 		switch {
 		case call == nil:
-			err = errors.New("rpc: unexpected sequence number in response")
-		case response.Error != "":
-			call.Error = errors.New(response.Error)
+			err = client.codec.ReadPayload(response, nil)
+			if err != nil {
+				err = errors.New("reading error body: " + err.Error())
+			}
+		case response.ErrorString() != "":
+			call.Error = errors.New(response.ErrorString())
+			err = client.codec.ReadPayload(response, nil)
+			if err != nil {
+				err = errors.New("reading error body: " + err.Error())
+			}
 			call.done()
 		default:
-			reflect.ValueOf(call.Reply).Elem().Set(reflect.ValueOf(response.Payload))
+			err = client.codec.ReadPayload(response, call.Reply)
+			if err != nil {
+				call.Error = errors.New("reading body " + err.Error())
+			}
 			call.done()
 		}
 	}
@@ -112,13 +121,12 @@ func (client *Client) send(call *Call) {
 	client.pending[seq] = call
 	client.mutex.Unlock()
 
-	// todo: use sync.Pool
-	request := &Request{
-		Seq:           seq,
-		ServiceMethod: call.ServiceMethod,
-		Payload:       call.Args,
-	}
-	err := client.codec.WriteRequest(request)
+	request := reqPool.Get().(*ARequest)
+	defer reqPool.Put(request)
+
+	request.Seq = seq
+	request.ServiceMethod = call.ServiceMethod
+	err := client.codec.WriteRequest(request, call.Args)
 	if err != nil {
 		client.mutex.Lock()
 		call = client.pending[seq]

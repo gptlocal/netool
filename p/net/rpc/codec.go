@@ -5,15 +5,46 @@ import (
 	"sync"
 )
 
-type Request struct {
-	ServiceMethod string `json:"service_method"`
+type Request interface {
+	Method() string
+	SeqId() uint64
+}
+
+type Response interface {
+	Method() string
+	SeqId() uint64
+	ErrorString() string
+}
+
+type ARequest struct {
+	ServiceMethod string `json:"method"`
 	Seq           uint64 `json:"seq"`
 }
 
-type Response struct {
-	ServiceMethod string `json:"service_method"`
+func (r *ARequest) Method() string {
+	return r.ServiceMethod
+}
+
+func (r *ARequest) SeqId() uint64 {
+	return r.Seq
+}
+
+type AResponse struct {
+	ServiceMethod string `json:"method"`
 	Seq           uint64 `json:"seq"`
 	Error         string `json:"error"`
+}
+
+func (r *AResponse) Method() string {
+	return r.ServiceMethod
+}
+
+func (r *AResponse) SeqId() uint64 {
+	return r.Seq
+}
+
+func (r *AResponse) ErrorString() string {
+	return r.Error
 }
 
 var (
@@ -24,20 +55,22 @@ var (
 )
 
 func init() {
-	reqPool.New = func() any { return new(Request) }
-	resPool.New = func() any { return new(Response) }
+	reqPool.New = func() any { return new(ARequest) }
+	resPool.New = func() any { return new(AResponse) }
 }
 
 type ClientCodec interface {
-	WriteRequest(req *Request, payload any) error
-	ReadResponse(res *Response, payload any) error
+	WriteRequest(req Request, payload any) error
+	ReadResponse() (Response, error)
+	ReadPayload(res Response, payload any) error
 
 	Close() error
 }
 
 type ServerCodec interface {
-	ReadRequest(req *Request, payload any) error
-	WriteResponse(res *Response, payload any) error
+	ReadRequest() (Request, error)
+	ReadPayload(req Request, payload any) error
+	WriteResponse(res Response, payload any) error
 
 	Close() error
 }
