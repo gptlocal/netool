@@ -1,183 +1,17 @@
 package rpc_test
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"reflect"
+	"strings"
 	"testing"
 
 	. "github.com/gptlocal/netool/p/net/rpc"
 )
-
-func Test_GobCodec(t *testing.T) {
-	cli, srv := net.Pipe()
-	defer cli.Close()
-	defer srv.Close()
-
-	go func() {
-		srvCodec := NewGobServerCodec(srv)
-		req, err := srvCodec.ReadRequest()
-		if err != nil {
-			return
-		}
-		t.Logf("ReadRequest: %v", req)
-
-		var args Args
-		srvCodec.ReadPayload(req, &args)
-
-		reply := Reply{
-			C: args.A + args.B,
-		}
-		srvCodec.WriteResponse(&AResponse{
-			ServiceMethod: req.Method(),
-			Seq:           req.SeqId(),
-		}, reply)
-	}()
-
-	cliCodec := NewGobClientCodec(cli)
-	err := cliCodec.WriteRequest(&ARequest{
-		ServiceMethod: "Arith.Add",
-		Seq:           123,
-	}, &Args{7, 8})
-
-	if err != nil {
-		t.Fatalf("WriteRequest: %s", err)
-	}
-
-	resp, err := cliCodec.ReadResponse()
-	if err != nil {
-		t.Fatalf("ReadResponse: %s", err)
-	}
-
-	var reply Reply
-	cliCodec.ReadPayload(resp, &reply)
-
-	if reply.C != 15 {
-		t.Fatalf("expected 15, got %d", reply.C)
-	}
-	t.Logf("ReadResponse: %v", reply.C)
-}
-
-func TestGobDecodeEncode(t *testing.T) {
-	gob.Register(Args{})
-	gob.Register(Reply{})
-
-	r1, w1 := io.Pipe()
-	defer r1.Close()
-
-	var out bytes.Buffer
-	sc := NewGobServerCodec(struct {
-		io.Reader
-		io.Writer
-		io.Closer
-	}{
-		Reader: r1,
-		Writer: &out,
-		Closer: io.NopCloser(nil),
-	})
-
-	go func() {
-		enc := gob.NewEncoder(w1)
-		if err := enc.Encode(&ARequest{ServiceMethod: "Arith.Add", Seq: 123}); err != nil {
-			t.Logf("encode err: %v", err)
-		}
-		if err := enc.Encode(&Args{7, 9}); err != nil {
-			t.Logf("encode err: %v", err)
-		}
-	}()
-
-	req, err := sc.ReadRequest()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var args Args
-	sc.ReadPayload(req, &args)
-	if err := sc.WriteResponse(&AResponse{req.Method(), req.SeqId(), ""}, &Reply{args.A + args.B}); err != nil {
-		t.Fatal(err)
-	}
-
-	dec := gob.NewDecoder(&out)
-	res := new(AResponse)
-	if err := dec.Decode(res); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("res: %#v", res)
-
-	reply := new(Reply)
-	if err := dec.Decode(reply); err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("reply: %#v", reply)
-}
-
-func Test_GobClientCall(t *testing.T) {
-	cli, srv := net.Pipe()
-	defer cli.Close()
-	defer srv.Close()
-
-	go RunGobService(srv)
-
-	client := NewClient(NewGobClientCodec(cli))
-
-	// Synchronous calls
-	args := &Args{7, 8}
-	reply := new(Reply)
-	err := client.Call("Arith.Add", args, reply)
-	if err != nil {
-		t.Errorf("Add: expected no error but got string %q", err.Error())
-	}
-	if reply.C != args.A+args.B {
-		t.Errorf("Add: got %d expected %d", reply.C, args.A+args.B)
-	}
-
-	args = &Args{7, 8}
-	reply = new(Reply)
-	err = client.Call("Arith.Mul", args, reply)
-	if err != nil {
-		t.Errorf("Mul: expected no error but got string %q", err.Error())
-	}
-	if reply.C != args.A*args.B {
-		t.Errorf("Mul: got %d expected %d", reply.C, args.A*args.B)
-	}
-
-	// Out of order.
-	args = &Args{7, 8}
-	mulReply := new(Reply)
-	mulCall := client.Go("Arith.Mul", args, mulReply, nil)
-	addReply := new(Reply)
-	addCall := client.Go("Arith.Add", args, addReply, nil)
-
-	addCall = <-addCall.Done
-	if addCall.Error != nil {
-		t.Errorf("Add: expected no error but got string %q", addCall.Error.Error())
-	}
-	if addReply.C != args.A+args.B {
-		t.Errorf("Add: got %d expected %d", addReply.C, args.A+args.B)
-	}
-
-	mulCall = <-mulCall.Done
-	if mulCall.Error != nil {
-		t.Errorf("Mul: expected no error but got string %q", mulCall.Error.Error())
-	}
-	if mulReply.C != args.A*args.B {
-		t.Errorf("Mul: got %d expected %d", mulReply.C, args.A*args.B)
-	}
-
-	// Error test
-	args = &Args{7, 0}
-	reply = new(Reply)
-	err = client.Call("Arith.Div", args, reply)
-	// expect an error: zero divide
-	if err == nil {
-		t.Error("Div: expected error")
-	} else if err.Error() != "divide by zero" {
-		t.Error("Div: expected divide by zero error; got", err)
-	}
-}
 
 func TestServerNoParams(t *testing.T) {
 	cli, srv := net.Pipe()
@@ -311,6 +145,45 @@ func TestJSONClient(t *testing.T) {
 	}
 }
 
+func TestBuiltinTypes(t *testing.T) {
+	cli, srv := net.Pipe()
+	go RunJSONService(srv)
+
+	client := NewClient(NewJSONClientCodec(cli))
+	defer cli.Close()
+
+	// Map
+	arg := 7
+	replyMap := map[int]int{}
+	err := client.Call("BuiltinTypes.Map", arg, &replyMap)
+	if err != nil {
+		t.Errorf("Map: expected no error but got string %q", err.Error())
+	}
+	if replyMap[arg] != arg {
+		t.Errorf("Map: expected %d got %d", arg, replyMap[arg])
+	}
+
+	// Slice
+	replySlice := []int{}
+	err = client.Call("BuiltinTypes.Slice", arg, &replySlice)
+	if err != nil {
+		t.Errorf("Slice: expected no error but got string %q", err.Error())
+	}
+	if e := []int{arg}; !reflect.DeepEqual(replySlice, e) {
+		t.Errorf("Slice: expected %v got %v", e, replySlice)
+	}
+
+	// Array
+	replyArray := [1]int{}
+	err = client.Call("BuiltinTypes.Array", arg, &replyArray)
+	if err != nil {
+		t.Errorf("Array: expected no error but got string %q", err.Error())
+	}
+	if e := [1]int{arg}; !reflect.DeepEqual(replyArray, e) {
+		t.Errorf("Array: expected %v got %v", e, replyArray)
+	}
+}
+
 func TestJSONMalformedInput(t *testing.T) {
 	cli, srv := net.Pipe()
 	go cli.Write([]byte(`{id:1}`)) // invalid json
@@ -332,4 +205,48 @@ func TestMalformedOutput(t *testing.T) {
 		t.Error("expected error")
 	}
 	t.Logf("expected error: %s, reply: %v", err, reply)
+}
+
+func TestServerErrorHasNullResult(t *testing.T) {
+	var out strings.Builder
+	sc := NewJSONServerCodec(struct {
+		io.Reader
+		io.Writer
+		io.Closer
+	}{
+		Reader: strings.NewReader(`{"method": "Arith.Add", "seq": 123}`),
+		Writer: &out,
+		Closer: io.NopCloser(nil),
+	})
+
+	_, err := sc.ReadRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const valueText = "the value we don't want to see"
+	const errorText = "some error"
+	err = sc.WriteResponse(&AResponse{
+		ServiceMethod: "Method",
+		Seq:           1,
+		Error:         errorText,
+	}, valueText)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("response: %s", &out)
+
+	if !strings.Contains(out.String(), errorText) {
+		t.Fatalf("Response didn't contain expected error %q: %s", errorText, &out)
+	}
+	if strings.Contains(out.String(), valueText) {
+		t.Errorf("Response contains both an error and value: %s", &out)
+	}
+}
+
+func TestUnexpectedError(t *testing.T) {
+	cli, srv := myPipe()
+	go cli.PipeWriter.CloseWithError(errors.New("unexpected error!")) // reader will get this error
+	RunJSONService(srv)                                               // must return, not loop
 }

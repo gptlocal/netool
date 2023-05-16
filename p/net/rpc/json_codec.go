@@ -27,6 +27,11 @@ type serverResponse struct {
 	Payload any `json:"payload"`
 }
 
+func (r *serverResponse) reset() {
+	r.Error = ""
+	r.Payload = nil
+}
+
 var (
 	clientReqPool sync.Pool
 	clientResPool sync.Pool
@@ -72,12 +77,18 @@ func (c *jsonServerCodec) ReadPayload(req Request, payload any) error {
 
 func (c *jsonServerCodec) WriteResponse(r Response, payload any) error {
 	jsonRes := serverResPool.Get().(*serverResponse)
-	defer serverResPool.Put(jsonRes)
+	defer func() {
+		jsonRes.reset()
+		serverResPool.Put(jsonRes)
+	}()
 
 	jsonRes.ServiceMethod = r.Method()
 	jsonRes.Seq = r.SeqId()
-	jsonRes.Error = r.ErrorString()
-	jsonRes.Payload = payload
+	if r.ErrorString() != "" {
+		jsonRes.Error = r.ErrorString()
+	} else {
+		jsonRes.Payload = payload
+	}
 	return c.enc.Encode(&jsonRes)
 }
 
