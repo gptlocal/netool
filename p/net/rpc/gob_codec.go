@@ -7,6 +7,8 @@ import (
 	"log"
 )
 
+var invalidRequest = struct{}{}
+
 type gobClientCodec struct {
 	rwc    io.ReadWriteCloser
 	dec    *gob.Decoder
@@ -56,8 +58,8 @@ func (c *gobServerCodec) ReadRequest() (Request, error) {
 	return r, nil
 }
 
-func (c *gobServerCodec) ReadPayload(r Request, body any) error {
-	return c.dec.Decode(body)
+func (c *gobServerCodec) ReadPayload(r Request, payload any) error {
+	return c.dec.Decode(payload)
 }
 
 func (c *gobServerCodec) WriteResponse(r Response, payload any) (err error) {
@@ -69,6 +71,9 @@ func (c *gobServerCodec) WriteResponse(r Response, payload any) (err error) {
 		return
 	}
 
+	if payload == nil {
+		payload = invalidRequest
+	}
 	if err = c.enc.Encode(payload); err != nil {
 		if c.encBuf.Flush() == nil {
 			log.Println("rpc: gob error encoding body:", err)

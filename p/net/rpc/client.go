@@ -1,9 +1,12 @@
 package rpc
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"sync"
 )
 
@@ -15,6 +18,43 @@ type Client struct {
 	pending  map[uint64]*Call
 	closing  bool
 	shutdown bool
+}
+
+func DialHTTP(network, address string) (*Client, error) {
+	return DialHTTPPath(network, address, DefaultRPCPath)
+}
+
+// DialHTTPPath connects to an HTTP RPC server at the specified network address and path.
+func DialHTTPPath(network, address, path string) (*Client, error) {
+	conn, err := net.Dial(network, address)
+	if err != nil {
+		return nil, err
+	}
+	io.WriteString(conn, "CONNECT "+path+" HTTP/1.0\n\n")
+
+	// Require successful HTTP response before switching to RPC protocol.
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	if err == nil && resp.Status == connected {
+		return NewClient(NewGobClientCodec(conn)), nil
+	}
+	if err == nil {
+		err = errors.New("unexpected HTTP response: " + resp.Status)
+	}
+	conn.Close()
+	return nil, &net.OpError{
+		Op:   "dial-http",
+		Net:  network + " " + address,
+		Addr: nil,
+		Err:  err,
+	}
+}
+
+func Dial(network, address string) (*Client, error) {
+	conn, err := net.Dial(network, address)
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(NewGobClientCodec(conn)), nil
 }
 
 func NewClient(codec ClientCodec) *Client {
@@ -46,6 +86,17 @@ func (client *Client) Go(serviceMethod string, args any, reply any, done chan *C
 	call.Done = done
 	client.send(call)
 	return call
+}
+
+func (client *Client) Close() error {
+	client.mutex.Lock()
+	if client.closing {
+		client.mutex.Unlock()
+		return ErrShutdown
+	}
+	client.closing = true
+	client.mutex.Unlock()
+	return client.codec.Close()
 }
 
 func (client *Client) input() {

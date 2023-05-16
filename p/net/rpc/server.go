@@ -6,10 +6,21 @@ import (
 	"go/token"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 )
+
+const (
+	// Defaults used by HandleHTTP
+	DefaultRPCPath   = "/_goRPC_"
+	DefaultDebugPath = "/debug/rpc"
+)
+
+// Can connect to RPC service using HTTP CONNECT to rpcPath.
+var connected = "200 Connected to Go RPC"
 
 type Server struct {
 	serviceMap sync.Map // map[string]*service
@@ -17,6 +28,39 @@ type Server struct {
 
 func NewServer() *Server {
 	return &Server{}
+}
+
+func (server *Server) Accept(lis net.Listener) {
+	for {
+		conn, err := lis.Accept()
+		if err != nil {
+			log.Print("rpc.Serve: accept:", err.Error())
+			return
+		}
+		go server.ServeConn(NewGobServerCodec(conn))
+	}
+}
+
+// ServeHTTP implements an http.Handler that answers RPC requests.
+func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.Method != "CONNECT" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+	conn, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		return
+	}
+	io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	server.ServeConn(NewGobServerCodec(conn))
+}
+
+func (server *Server) HandleHTTP(rpcPath, debugPath string) {
+	http.Handle(rpcPath, server)
+	http.Handle(debugPath, debugHTTP{server})
 }
 
 func (server *Server) ServeConn(codec ServerCodec) {
@@ -95,9 +139,10 @@ func (server *Server) handleRequest(codec ServerCodec, req Request) (*service, *
 func (server *Server) readRequestHeader(codec ServerCodec) (Request, error) {
 	req, err := codec.ReadRequest()
 	if err != nil {
-		if err != io.EOF {
-			log.Println("rpc:", err)
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return nil, err
 		}
+		err = errors.New("rpc: server cannot decode request: " + err.Error())
 		return nil, err
 	}
 	return req, nil
@@ -263,4 +308,25 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 		t = t.Elem()
 	}
 	return token.IsExported(t.Name()) || t.PkgPath() == ""
+}
+
+// ServeRequest is like ServeCodec but synchronously serves a single request.
+// It does not close the codec upon completion.
+func (server *Server) ServeRequest(codec ServerCodec) error {
+	sending := new(sync.Mutex)
+	req, err := server.readRequestHeader(codec)
+	if err != nil {
+		log.Printf("rpc: server cannot decode request: %v", err)
+		return err
+	}
+
+	svc, mtype, resp, argv, replyv := server.handleRequest(codec, req)
+	if resp.ErrorString() != "" {
+		log.Printf("rpc: serve request handle request error %s: %s", req.Method(), resp.ErrorString())
+		server.sendResponse(sending, codec, resp, nil)
+		return errors.New(resp.ErrorString())
+	}
+
+	svc.call(server, sending, nil, mtype, resp, argv, replyv, codec)
+	return nil
 }

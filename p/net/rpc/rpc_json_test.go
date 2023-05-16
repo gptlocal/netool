@@ -145,7 +145,7 @@ func TestJSONClient(t *testing.T) {
 	}
 }
 
-func TestBuiltinTypes(t *testing.T) {
+func TestJSONBuiltinTypes(t *testing.T) {
 	cli, srv := net.Pipe()
 	go RunJSONService(srv)
 
