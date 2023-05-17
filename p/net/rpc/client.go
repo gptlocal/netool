@@ -192,7 +192,7 @@ func (client *Client) send(call *Call) {
 		delete(client.pending, seq)
 		client.mutex.Unlock()
 
-		call.Error = errors.New("writing request: " + err.Error())
+		call.Error = err
 		call.done()
 	}
 }

@@ -37,6 +37,13 @@ type methodType struct {
 	ReplyType reflect.Type
 }
 
+func (m *methodType) NumCalls() (n uint) {
+	m.Lock()
+	n = m.numCalls
+	m.Unlock()
+	return n
+}
+
 type service struct {
 	name   string
 	rcvr   reflect.Value

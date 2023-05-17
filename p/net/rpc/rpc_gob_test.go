@@ -608,6 +608,7 @@ func TestClientWriteError(t *testing.T) {
 	if err.Error() != "fake write failure" {
 		t.Error("unexpected value of error:", err)
 	}
+	t.Logf("res: %v, error: %v", res, err)
 	w.done <- true
 }
 
