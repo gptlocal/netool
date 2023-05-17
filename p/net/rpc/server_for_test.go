@@ -26,8 +26,16 @@ type Args struct {
 	B int `json:"b"`
 }
 
+func (a *Args) String() string {
+	return fmt.Sprintf("%d, %d", a.A, a.B)
+}
+
 type Reply struct {
 	C int `json:"c"`
+}
+
+func (r *Reply) String() string {
+	return fmt.Sprintf("%d", r.C)
 }
 
 type Arith int
