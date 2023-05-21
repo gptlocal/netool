@@ -1,9 +1,10 @@
-module github.com/gptlocal/netool
+module github.com/gptlocal/netool/examples
 
 go 1.20
 
+replace github.com/gptlocal/netool => ../
+
 require (
-	golang.org/x/time v0.3.0
 	google.golang.org/grpc v1.55.0
 	google.golang.org/protobuf v1.30.0
 )

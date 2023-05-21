@@ -54,7 +54,7 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
 		return
 	}
-	io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")
+	io.WriteString(conn, "HTTP/1.0 "+connected+"\n\r\n\r\n")
 	server.ServeConn(NewGobServerCodec(conn))
 }
 
