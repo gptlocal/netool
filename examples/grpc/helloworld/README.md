@@ -14,4 +14,9 @@ $ go run greeter_client/main.go --name=Alice
 2023/05/22 02:10:50 Greeting: Hello Alice
 $ go run greeter_client/main.go --name=Bob
 2023/05/22 02:11:02 Greeting: Hello Bob
+
+$ grpcurl -plaintext -d '{"name": "Alice"}' localhost:50051 helloworld.Greeter/SayHello
+{
+  "message": "Hello Alice"
+}
 ```
