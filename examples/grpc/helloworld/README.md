@@ -15,6 +15,13 @@ $ go run greeter_client/main.go --name=Alice
 $ go run greeter_client/main.go --name=Bob
 2023/05/22 02:11:02 Greeting: Hello Bob
 
+$ grpcurl -plaintext localhost:50051 list
+grpc.reflection.v1alpha.ServerReflection
+helloworld.Greeter
+$ grpcurl -plaintext localhost:50051 list helloworld.Greeter                                                                      2:18:52 
+helloworld.Greeter.SayHello
+$ grpcurl -plaintext localhost:50051 list grpc.reflection.v1alpha.ServerReflection
+grpc.reflection.v1alpha.ServerReflection.ServerReflectionInfo
 $ grpcurl -plaintext -d '{"name": "Alice"}' localhost:50051 helloworld.Greeter/SayHello
 {
   "message": "Hello Alice"
