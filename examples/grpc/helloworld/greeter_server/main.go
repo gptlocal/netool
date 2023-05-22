@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"google.golang.org/grpc/metadata"
 	"log"
 	"net"
 
@@ -25,6 +26,15 @@ type server struct {
 
 // SayHello implements helloworld.GreeterServer
 func (s *server) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
+	if md, ok := metadata.FromIncomingContext(ctx); ok {
+		for k, v := range md {
+			log.Printf("Received header metadata : %v : %v", k, v)
+		}
+	}
+	err := grpc.SetTrailer(ctx, metadata.Pairs("tracing-enabled", "1"))
+	if err != nil {
+		log.Printf("SetTrailer error: %v", err)
+	}
 	log.Printf("Received: %v", in.GetName())
 	return &pb.HelloReply{Message: "Hello " + in.GetName()}, nil
 }

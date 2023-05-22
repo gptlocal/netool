@@ -39,13 +39,12 @@ func main() {
 	md := metadata.Pairs("trace-id", "12345678901234567890123456789012:1234567890123456:9876543210123456")
 	ctx = metadata.NewOutgoingContext(ctx, md)
 
-	var header, tailer metadata.MD
-	r, err := c.SayHello(ctx, &pb.HelloRequest{Name: *name}, grpc.Header(&header), grpc.Trailer(&tailer))
+	var tailer metadata.MD
+	r, err := c.SayHello(ctx, &pb.HelloRequest{Name: *name}, grpc.Trailer(&tailer))
 	if err != nil {
 		log.Fatalf("could not greet: %v", err)
 	}
 
-	log.Printf("Header: %v", header)
 	log.Printf("Trailer: %v", tailer)
 	log.Printf("Greeting: %s", r.GetMessage())
 }
