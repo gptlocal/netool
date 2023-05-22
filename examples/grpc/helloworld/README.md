@@ -26,4 +26,16 @@ $ grpcurl -plaintext -d '{"name": "Alice"}' localhost:50051 helloworld.Greeter/S
 {
   "message": "Hello Alice"
 }
+
+$ grpcurl -plaintext localhost:50051 list grpc.health.v1.Health
+grpc.health.v1.Health.Check
+grpc.health.v1.Health.Watch
+$ grpcurl -plaintext -d '{"service": "Service001"}' localhost:50051 grpc.health.v1.Health.Check
+ERROR:
+  Code: NotFound
+  Message: unknown service
+$ grpcurl -plaintext -d '{"service": "/helloworld.Greeter/SayHello"}' localhost:50051 grpc.health.v1.Health.Check
+{
+  "status": "SERVING"
+}
 ```

@@ -9,6 +9,8 @@ import (
 
 	pb "github.com/gptlocal/netool/examples/grpc/helloworld"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -34,8 +36,13 @@ func main() {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	s := grpc.NewServer()
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(s, healthServer)
 	pb.RegisterGreeterServer(s, &server{})
+
 	reflection.Register(s)
+	healthServer.SetServingStatus(pb.Greeter_SayHello_FullMethodName, grpc_health_v1.HealthCheckResponse_SERVING)
+
 	log.Printf("server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
