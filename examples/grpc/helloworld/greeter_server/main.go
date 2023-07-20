@@ -4,15 +4,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"google.golang.org/grpc/metadata"
-	"log"
-	"net"
-
 	pb "github.com/gptlocal/netool/examples/grpc/helloworld"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
+	"log"
+	"net"
+	"time"
 )
 
 var (
@@ -45,7 +46,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
-	s := grpc.NewServer()
+	kp := keepalive.ServerParameters{
+		MaxConnectionIdle: 24 * time.Hour,
+		Time:              2 * time.Hour,
+		Timeout:           20 * time.Second,
+	}
+	s := grpc.NewServer(grpc.KeepaliveParams(kp))
+	//s := grpc.NewServer()
+
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(s, healthServer)
 	pb.RegisterGreeterServer(s, &server{})

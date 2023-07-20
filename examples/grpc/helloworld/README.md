@@ -38,4 +38,9 @@ $ grpcurl -plaintext -d '{"service": "/helloworld.Greeter/SayHello"}' localhost:
 {
   "status": "SERVING"
 }
+$ grpcurl -plaintext -d '{"service": "/helloworld.Greeter/SayHello"}' localhost:50051 grpc.health.v1.Health.Watch
+$ grpcurl -plaintext -d '{"service": "/helloworld.Greeter/SayHello"}' localhost:50051 grpc.health.v1.Health/Watch
+{
+  "status": "SERVING"
+}
 ```
