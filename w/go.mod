@@ -1,8 +1,11 @@
-module github.com/gptlocal/netool/examples
+module github.com/gptlocal/netool/w
 
-go 1.20
+go 1.21
+
+replace github.com/gptlocal/netool/z => ../z
 
 require (
+	github.com/gptlocal/netool/z v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.59.0
 	google.golang.org/protobuf v1.31.0
 )
